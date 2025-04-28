@@ -336,7 +336,7 @@
 
             <div class="hidden" id="profileSection">
                 <h2>Profile</h2>
-                <p>Profile information will be displayed here.</p>
+                <button onclick="window.location.href='/profile.html'" style="background-color: #007BFF; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; margin-top: 10px;">Edit Profile</button>                <!-- <p>Profile information will be displayed here.</p> -->
             </div>
         </main>
     </div>
@@ -345,20 +345,20 @@
         let currentDonorName = localStorage.getItem('currentDonor') || 'Donor';
 
         async function fetchDonationHistory() {
-            try {
-                const response = await fetch('http://localhost:5500/api/donation_history');
-                const data = await response.json();
-                if (data.success) {
-                    return data.data;
-                } else {
-                    console.error('Failed to fetch donation history:', data.message);
-                    return [];
-                }
-            } catch (err) {
-                console.error('Error fetching donation history:', err);
-                return [];
-            }
-        }
+  try {
+    const response = await fetch(`http://localhost:5500/api/donation_history?donorName=${encodeURIComponent(currentDonorName)}`);
+    const data = await response.json();
+    if (data.success) {
+      return data.data;
+    } else {
+      console.error('Failed to fetch donation history:', data.message);
+      return [];
+    }
+  } catch (err) {
+    console.error('Error fetching donation history:', err);
+    return [];
+  }
+}
 
         async function updateStatistics() {
             const donations = await fetchDonationHistory();
@@ -456,7 +456,8 @@
 
         function handleLogout() {
             localStorage.removeItem('currentDonor');
-            window.location.href = '/login';
+            alert('You have been logged out successfully.');
+            window.location.href = '/index.html';
         }
 
         // Initialize

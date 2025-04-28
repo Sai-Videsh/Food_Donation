@@ -190,3 +190,4 @@ CREATE TABLE Inventory (
 );
 INSERT INTO Inventory (InventoryID, FoodItemID, Quantity, StorageLocationID)
 VALUES (1, 1, 50, 1);
+

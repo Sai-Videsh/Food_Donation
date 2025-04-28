@@ -185,13 +185,16 @@ const server = http.createServer((req, res) => {
 
               // Role-specific insertion queries
               let insertQuery;
-              let params = [results.insertId, name, normalizedPhone, address, hash];
+              let params;
               if (table === "Donor") {
                 insertQuery = "INSERT INTO Donor (Name, PhoneNumber, Address, Password) VALUES (?, ?, ?, ?)";  // donorID
+                params = [name, normalizedPhone, address, hash];
               } else if (table === "Recipient") {
-                insertQuery = "INSERT INTO Recipient (RecipientID, Name, PhoneNumber, Address, Password) VALUES (?, ?, ?, ?, ?)";
+                insertQuery = "INSERT INTO Recipient (Name, PhoneNumber, Address, Password) VALUES (?, ?, ?, ?)";
+                params = [name, normalizedPhone, address, hash];
               } else if (table === "Volunteer") {
-                insertQuery = "INSERT INTO Volunteer (VolunteerID, Name, PhoneNumber, Address, Password) VALUES (?, ?, ?, ?, ?)";
+                insertQuery = "INSERT INTO Volunteer (Name, PhoneNumber, Address, Password) VALUES (?, ?, ?, ?)";
+                params = [name, normalizedPhone, address, hash];
               }
 
               db.query(insertQuery, params, (err) => {
@@ -406,7 +409,108 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ success: true, data: results }));
       }
     );
-  } else if (req.url === "/api/opportunities" && req.method === "GET") {
+  } 
+  // Fetch user profile
+// Fetch user profile
+else if (req.url === '/api/profile' && req.method === "GET") {
+  const urlParams = new URLSearchParams(req.url.split('?')[1] || '');
+  const userName = urlParams.get('userName');
+
+  const query = `
+    SELECT up.*
+    FROM UserProfile up
+    JOIN User u ON up.UserID = u.UserID
+    WHERE u.Name = ?
+  `;
+  db.query(query, [userName], (err, results) => {
+    if (err) {
+      console.error("❌ Profile fetch error:", err);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ success: false, message: err.message }));
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, data: results }));
+  });
+}
+
+// Save or update user profile with duplicate name check
+else if (req.url === '/api/profile' && req.method === "POST") {
+  let body = '';
+  req.on("data", (chunk) => { body += chunk; });
+  req.on("end", () => {
+    try {
+      const { userName, bio, contactMethod, notifications } = JSON.parse(body);
+
+      // Check for duplicate name
+      db.query("SELECT COUNT(*) AS count FROM User WHERE Name = ?", [userName], (err, results) => {
+        if (err) {
+          console.error("❌ Duplicate check error:", err);
+          res.writeHead(500, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ success: false, message: "Database error" }));
+        }
+        if (results[0].count > 0) {
+          res.writeHead(400, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ success: false, message: "Name already exists. Please use a different name." }));
+        }
+
+        // If no duplicate, proceed to save or update profile
+        db.query("SELECT UserID FROM User WHERE Name = ?", [userName], (err, results) => {
+          if (err || results.length === 0) {
+            console.error("❌ User not found:", err);
+            res.writeHead(404, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ success: false, message: "User not found" }));
+          }
+
+          const userId = results[0].UserID;
+
+          db.query("SELECT * FROM UserProfile WHERE UserID = ?", [userId], (err, results) => {
+            if (err) {
+              console.error("❌ Profile check error:", err);
+              res.writeHead(500, { "Content-Type": "application/json" });
+              return res.end(JSON.stringify({ success: false, message: "Database error" }));
+            }
+
+            if (results.length > 0) {
+              const updateQuery = `
+                UPDATE UserProfile
+                SET Bio = ?, PreferredContactMethod = ?, NotificationPreference = ?
+                WHERE UserID = ?
+              `;
+              db.query(updateQuery, [bio, contactMethod, notifications, userId], (err) => {
+                if (err) {
+                  console.error("❌ Profile update error:", err);
+                  res.writeHead(500, { "Content-Type": "application/json" });
+                  return res.end(JSON.stringify({ success: false, message: "Database error" }));
+                }
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ success: true }));
+              });
+            } else {
+              const insertQuery = `
+                INSERT INTO UserProfile (UserID, Bio, PreferredContactMethod, NotificationPreference)
+                VALUES (?, ?, ?, ?)
+              `;
+              db.query(insertQuery, [userId, bio, contactMethod, notifications], (err) => {
+                if (err) {
+                  console.error("❌ Profile insert error:", err);
+                  res.writeHead(500, { "Content-Type": "application/json" });
+                  return res.end(JSON.stringify({ success: false, message: "Database error" }));
+                }
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ success: true }));
+              });
+            }
+          });
+        });
+      });
+    } catch (parseError) {
+      console.error("❌ JSON parse error:", parseError);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ success: false, message: "Invalid JSON data" }));
+    }
+  });
+}
+  else if (req.url === "/api/opportunities" && req.method === "GET") {
     const opportunities = [
       { name: "Food Sorting", location: "Warehouse A", description: "Help sort donated food items." },
       { name: "Delivery Driver", location: "City Center", description: "Deliver food to recipients." },
@@ -423,10 +527,26 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ success: true, data: results }));
     });
-  } else if (req.url === "/api/donation_history" && req.method === "GET") {
-    db.query(
-      "SELECT d.DonationID, d.DateOfDonation, d.Quantity, f.FoodItemName, p.Status FROM DonationDetails d JOIN FoodItems f ON d.Quantity = f.Quantity JOIN PickupRequest p ON d.DonationID = p.PickupID",
-      (err, results) => {
+  }else if (req.url.startsWith('/api/donation_history') && req.method === "GET") {
+    let body = '';
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => {
+      // Parse query parameters (e.g., ?donorName=John%20Doe)
+      const urlParams = new URLSearchParams(req.url.split('?')[1] || '');
+      const donorName = urlParams.get('donorName');
+  
+      let query = `
+        SELECT d.DonationID, d.DateOfDonation, d.Quantity, f.FoodItemName, p.Status
+        FROM DonationDetails d
+        JOIN FoodItems f ON d.FoodItemID = f.FoodItemID
+        JOIN PickupRequest p ON d.DonationID = p.PickupID
+        WHERE d.DonorID IN (
+          SELECT DonorID FROM Donor WHERE Name = ?
+        )
+      `;
+      db.query(query, [donorName], (err, results) => {
         if (err) {
           console.error("❌ Donation history query error:", err);
           res.writeHead(500, { "Content-Type": "application/json" });
@@ -434,8 +554,8 @@ const server = http.createServer((req, res) => {
         }
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ success: true, data: results }));
-      }
-    );
+      });
+    });
   } else if (req.url === "/api/received_donations" && req.method === "GET") {
     db.query(
       "SELECT d.DonationID, d.DonorID, d.DateOfDonation, d.Quantity, f.FoodItemName, c.CategoryType, p.Status FROM DonationDetails d JOIN FoodItems f ON d.Quantity = f.Quantity JOIN Category c ON f.FoodItemID = c.FoodItemID JOIN PickupRequest p ON d.DonationID = p.PickupID", // changed
