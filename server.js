@@ -510,7 +510,171 @@ else if (req.url === '/api/profile' && req.method === "POST") {
     }
   });
 }
-  else if (req.url === "/api/opportunities" && req.method === "GET") {
+// Fetch food items for the dropdown
+else if (req.url === '/api/food_items' && req.method === "GET") {
+  db.query("SELECT FoodItemID, FoodItemName FROM FoodItems", (err, results) => {
+    if (err) {
+      console.error("❌ Food items fetch error:", err);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ success: false, message: "Database error" }));
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, data: results }));
+  });
+}
+
+// Submit donation request
+else if (req.url === '/api/request_donation' && req.method === "POST") {
+  let body = '';
+  req.on("data", (chunk) => { body += chunk; });
+  req.on("end", () => {
+    try {
+      const { recipientName, foodItemId, quantity } = JSON.parse(body);
+
+      db.query("SELECT UserID FROM User WHERE Name = ?", [recipientName], (err, results) => {
+        if (err || results.length === 0) {
+          console.error("❌ Recipient not found:", err);
+          res.writeHead(404, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ success: false, message: "Recipient not found" }));
+        }
+
+        const recipientId = results[0].UserID;
+        const insertQuery = "INSERT INTO DonationRequests (RecipientID, FoodItemID, Quantity) VALUES (?, ?, ?)";
+        db.query(insertQuery, [recipientId, foodItemId, quantity], (err) => {
+          if (err) {
+            console.error("❌ Request insertion error:", err);
+            res.writeHead(500, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ success: false, message: "Database error" }));
+          }
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: true }));
+        });
+      });
+    } catch (parseError) {
+      console.error("❌ JSON parse error:", parseError);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ success: false, message: "Invalid JSON data" }));
+    }
+  });
+}
+
+// Fetch pending requests for recipient
+else if (req.url.match(/^\/api\/pending_requests/) && req.method === "GET") {
+  const urlParams = new URLSearchParams(req.url.split('?')[1] || '');
+  const recipientName = urlParams.get('recipientName');
+
+  const query = `
+    SELECT dr.RequestID, f.FoodItemName, dr.Quantity, dr.Status, dr.RequestDate
+    FROM DonationRequests dr
+    JOIN User u ON dr.RecipientID = u.UserID
+    JOIN FoodItems f ON dr.FoodItemID = f.FoodItemID
+    WHERE u.Name = ? AND dr.Status IN ('pending', 'approved')
+  `;
+  db.query(query, [recipientName], (err, results) => {
+    if (err) {
+      console.error("❌ Pending requests fetch error:", err);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ success: false, message: "Database error" }));
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, data: results }));
+  });
+}
+
+// Fetch received donations for recipient
+else if (req.url.match(/^\/api\/received_donations/) && req.method === "GET") {
+  const urlParams = new URLSearchParams(req.url.split('?')[1] || '');
+  const recipientName = urlParams.get('recipientName');
+
+  const query = `
+    SELECT f.FoodItemName, rd.Quantity, rd.ReceivedDate
+    FROM ReceivedDonations rd
+    JOIN User u ON rd.RecipientID = u.UserID
+    JOIN FoodItems f ON rd.FoodItemID = f.FoodItemID
+    WHERE u.Name = ?
+  `;
+  db.query(query, [recipientName], (err, results) => {
+    if (err) {
+      console.error("❌ Received donations fetch error:", err);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ success: false, message: "Database error" }));
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, data: results }));
+  });
+}
+
+// Admin/Volunteer endpoint to view all pending requests (example)
+else if (req.url === '/api/all_pending_requests' && req.method === "GET") {
+  const query = `
+    SELECT u.Name AS RecipientName, f.FoodItemName, dr.Quantity, dr.Status, dr.RequestDate
+    FROM DonationRequests dr
+    JOIN User u ON dr.RecipientID = u.UserID
+    JOIN FoodItems f ON dr.FoodItemID = f.FoodItemID
+    WHERE dr.Status IN ('pending', 'approved')
+  `;
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error("❌ All pending requests fetch error:", err);
+      res.writeHead(500, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ success: false, message: "Database error" }));
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ success: true, data: results }));
+  });
+}
+
+// Mark donation as received (to be called by admin/volunteer)
+else if (req.url === "/api/mark_received" && req.method === "POST") {
+  let body = '';
+  req.on("data", (chunk) => { body += chunk; });
+  req.on("end", () => {
+    try {
+      const { requestId, recipientName } = JSON.parse(body);
+
+      db.query("SELECT UserID FROM User WHERE Name = ?", [recipientName], (err, results) => {
+        if (err || results.length === 0) {
+          console.error("❌ Recipient not found:", err);
+          res.writeHead(404, { "Content-Type": "application/json" });
+          return res.end(JSON.stringify({ success: false, message: "Recipient not found" }));
+        }
+
+        const recipientId = results[0].UserID;
+        db.query("SELECT * FROM DonationRequests WHERE RequestID = ? AND RecipientID = ?", [requestId, recipientId], (err, results) => {
+          if (err || results.length === 0) {
+            console.error("❌ Request not found:", err);
+            res.writeHead(404, { "Content-Type": "application/json" });
+            return res.end(JSON.stringify({ success: false, message: "Request not found" }));
+          }
+
+          const { FoodItemID, Quantity } = results[0];
+          db.query("INSERT INTO ReceivedDonations (RequestID, RecipientID, FoodItemID, Quantity) VALUES (?, ?, ?, ?)", 
+            [requestId, recipientId, FoodItemID, Quantity], (err) => {
+            if (err) {
+              console.error("❌ Received donation insert error:", err);
+              res.writeHead(500, { "Content-Type": "application/json" });
+              return res.end(JSON.stringify({ success: false, message: "Database error" }));
+            }
+            db.query("UPDATE DonationRequests SET Status = 'fulfilled' WHERE RequestID = ?", [requestId], (err) => {
+              if (err) {
+                console.error("❌ Status update error:", err);
+                res.writeHead(500, { "Content-Type": "application/json" });
+                return res.end(JSON.stringify({ success: false, message: "Database error" }));
+              }
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ success: true }));
+            });
+          });
+        });
+      });
+    } catch (parseError) {
+      console.error("❌ JSON parse error:", parseError);
+      res.writeHead(400, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ success: false, message: "Invalid JSON data" }));
+    }
+  });
+}  
+else if (req.url === "/api/opportunities" && req.method === "GET") {
     const opportunities = [
       { name: "Food Sorting", location: "Warehouse A", description: "Help sort donated food items." },
       { name: "Delivery Driver", location: "City Center", description: "Deliver food to recipients." },

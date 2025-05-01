@@ -81,6 +81,13 @@
                     <tbody id="donationsTable"></tbody>
                 </table>
             </div>
+            <div>
+                <h3>Pending Donation Requests</h3>
+                <table id="adminPendingRequests">
+                    <thead><tr><th>Recipient</th><th>Food Item</th><th>Quantity</th><th>Status</th><th>Requested On</th><th>Action</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
         </main>
     </div>
 
@@ -151,8 +158,48 @@
                 console.error('Error loading dashboard:', err);
                 alert('Unable to connect to server.');
             }
+            async function fetchPendingRequests() {
+        const response = await fetch('http://localhost:5500/api/all_pending_requests');
+        const data = await response.json();
+        if (data.success) {
+            const table = document.getElementById('adminPendingRequests').getElementsByTagName('tbody')[0];
+            table.innerHTML = '';
+            data.data.forEach(request => {
+                const row = table.insertRow();
+                row.insertCell(0).textContent = request.RecipientName;
+                row.insertCell(1).textContent = request.FoodItemName;
+                row.insertCell(2).textContent = request.Quantity + ' kg';
+                row.insertCell(3).textContent = request.Status;
+                row.insertCell(4).textContent = new Date(request.RequestDate).toLocaleString();
+                const actionCell = row.insertCell(5);
+                if (request.Status === 'pending' || request.Status === 'approved') {
+                    const button = document.createElement('button');
+                    button.textContent = 'Mark as Received';
+                    button.onclick = () => markAsReceived(request.RequestID, request.RecipientName);
+                    actionCell.appendChild(button);
+                }
+            });
         }
+    }
 
+    async function markAsReceived(requestId, recipientName) {
+        const response = await fetch('http://localhost:5500/api/mark_received', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestId, recipientName })
+        });
+        const data = await response.json();
+        if (data.success) {
+            alert('Donation marked as received!');
+            fetchPendingRequests();
+        } else {
+            alert('Failed: ' + data.message);
+        }
+    }
+
+    window.onload = fetchPendingRequests;
+        }
+        
         document.addEventListener('DOMContentLoaded', loadDashboard);
     </script>
 </body>
