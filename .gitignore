@@ -18,3 +18,4 @@ Thumbs.db
 # Ignore build folders if any
 /dist
 /build
+.vercel
